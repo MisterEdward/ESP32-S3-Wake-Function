@@ -204,6 +204,10 @@ const char *index_html = R"=====(
             background-color: var(--apple-red);
         }
         
+        .checking { /* New style for checking/unknown status */
+            background-color: var(--apple-gray);
+        }
+        
         .status-text {
             font-size: 16px;
             font-weight: 500;
@@ -335,8 +339,8 @@ const char *index_html = R"=====(
         
         <div class="content">
             <div class="status">
-                <div id="statusIndicator" class="status-indicator"></div>
-                <span id="statusText" class="status-text">Checking connection...</span>
+                <div id="statusIndicator" class="status-indicator checking"></div>
+                <span id="statusText" class="status-text">Checking PC status...</span>
             </div>
             
             <button id="wakeButton" class="button button-blue">Wake on USB</button>
@@ -403,6 +407,41 @@ const char *index_html = R"=====(
                     statusText.textContent = 'Connection issue';
                 });
         }
+
+        function checkPcStatus() {
+            statusIndicator.classList.remove('connected', 'disconnected');
+            statusIndicator.classList.add('checking');
+            statusText.textContent = 'Checking PC Status...';
+
+            fetch('/pc-status')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    statusIndicator.classList.remove('checking');
+                    if (data.pc_on) {
+                        statusIndicator.classList.add('connected');
+                        statusIndicator.classList.remove('disconnected');
+                        statusText.textContent = 'PC On';
+                    } else {
+                        statusIndicator.classList.add('disconnected');
+                        statusIndicator.classList.remove('connected');
+                        statusText.textContent = 'PC Off';
+                    }
+                })
+                .catch(() => {
+                    statusIndicator.classList.remove('connected', 'disconnected');
+                    statusIndicator.classList.add('checking'); // Or a dedicated 'unknown' class
+                    statusText.textContent = 'PC Status Unknown';
+                });
+        }
+
+        // Initial check and periodic updates for PC status
+        checkPcStatus();
+        setInterval(checkPcStatus, 5000); // Check every 5 seconds
 
         checkConnection();
         

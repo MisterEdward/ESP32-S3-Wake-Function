@@ -239,6 +239,17 @@ static void delayed_restart(void* arg) {
     esp_restart();
 }
 
+// Handler to get PC connection status
+static esp_err_t httpd_pc_status_get_handler(httpd_req_t *req) {
+    bool is_connected = usb_is_pc_connected();
+    char resp_str[32];
+    snprintf(resp_str, sizeof(resp_str), "{\"pc_on\": %s}", is_connected ? "true" : "false");
+    
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp_str, strlen(resp_str));
+    return ESP_OK;
+}
+
 // Handler to restart applications (Parsec or Anydesk)
 static esp_err_t httpd_restart_app_get_handler(httpd_req_t *req) {
     char app_name[32] = {0};
@@ -355,6 +366,15 @@ void httpd_init(void) {
         .handler = httpd_restart_app_get_handler
     };
     httpd_register_uri_handler(server, &restart_app);
+
+    // Register handler for PC status
+    static const httpd_uri_t pc_status = {
+        .uri       = "/pc-status",
+        .method    = HTTP_GET,
+        .handler   = httpd_pc_status_get_handler,
+        .user_ctx  = NULL
+    };
+    httpd_register_uri_handler(server, &pc_status);
 
     ESP_LOGI(TAG, "server started");
 }

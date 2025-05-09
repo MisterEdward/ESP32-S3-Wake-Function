@@ -63,6 +63,10 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_t
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t const *buffer, uint16_t bufsize) {
 }
 
+bool usb_is_pc_connected(void) {
+    return tud_mounted();
+}
+
 void usb_request_keypress_send(bool from_isr) {
 	if (from_isr)
 		xEventGroupSetBitsFromISR(usb_event_group, USB_EVENT_KEYPRESS, NULL);
@@ -188,41 +192,44 @@ static void usb_task(void *pvParameters) {
             xEventGroupClearBits(usb_event_group, USB_EVENT_RESTART);
             
             if (tud_mounted()) {
-                ESP_LOGI(TAG, "sending PC restart signal");
+                ESP_LOGI(TAG, "sending PC restart signal via shutdown command");
                 led_handle_keypress_on();
                 
-                #if CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_ENABLED
-                    ESP_LOGI(TAG, "Using hardware reset pin");
-                    gpio_config_t io_conf = {};
-                    io_conf.intr_type = GPIO_INTR_DISABLE;
-                    io_conf.mode = GPIO_MODE_OUTPUT;
-                    io_conf.pin_bit_mask = (1ULL << CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM);
-                    io_conf.pull_down_en = 0;
-                    io_conf.pull_up_en = 0;
-                    gpio_config(&io_conf);
-                    
-                    gpio_set_level(CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM, 0);
-                    vTaskDelay(pdMS_TO_TICKS(200));
-                    gpio_set_level(CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM, 1);
-                #else
-                    ESP_LOGI(TAG, "Using keyboard sequence for restart");
-                    
-                    tud_remote_wakeup();
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                    
-                    uint8_t keycode[6] = { HID_KEY_DELETE };
-                    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 
-                                           KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_LEFTALT, 
-                                           keycode);
-                    vTaskDelay(pdMS_TO_TICKS(100));
-                    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                    
-                    send_key(HID_KEY_ARROW_UP, 0, 100, 300);
-                    send_key(HID_KEY_ENTER, 0, 100, 300);
-                    send_key(HID_KEY_ARROW_UP, 0, 100, 300);
-                    send_key(HID_KEY_ENTER, 0, 100, 300);
-                #endif
+                // The following sequence uses USB HID to send keyboard commands to restart the PC
+                // via the Windows Run dialog (Win+R) and the "shutdown /r /t 0" command.
+                // This software-based approach replaces previous potential methods such as:
+                // 1. A keyboard sequence like Ctrl+Alt+Del.
+                // 2. A "GPIO-based reset", which would involve using an ESP32 GPIO pin
+                //    connected to the PC's motherboard reset header to trigger a hardware reset.
+                // The current method provides a more graceful restart initiated by the OS.
+
+                // Ensure PC is awake
+                tud_remote_wakeup();
+                vTaskDelay(pdMS_TO_TICKS(500)); // Wait for PC to respond
+                
+                // Press Win + R to open Run dialog
+                send_key(HID_KEY_R, KEYBOARD_MODIFIER_LEFTGUI, 100, 300);
+                
+                // Type "shutdown /r /t 0"
+                send_key(HID_KEY_S, 0, 100, 50);
+                send_key(HID_KEY_H, 0, 100, 50);
+                send_key(HID_KEY_U, 0, 100, 50);
+                send_key(HID_KEY_T, 0, 100, 50);
+                send_key(HID_KEY_D, 0, 100, 50);
+                send_key(HID_KEY_O, 0, 100, 50);
+                send_key(HID_KEY_W, 0, 100, 50);
+                send_key(HID_KEY_N, 0, 100, 50);
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_SLASH, 0, 100, 50); // '/'
+                send_key(HID_KEY_R, 0, 100, 50);     // 'r'
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_SLASH, 0, 100, 50); // '/'
+                send_key(HID_KEY_T, 0, 100, 50);     // 't'
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_0, 0, 100, 50);     // '0'
+                
+                // Press Enter
+                send_key(HID_KEY_ENTER, 0, 100, 50);
                 
                 led_handle_keypress_off();
             } else {
