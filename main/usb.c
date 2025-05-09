@@ -5,20 +5,26 @@
 #include <class/hid/hid_device.h>
 #include <esp_log.h>
 #include <event_groups.h>
+#include <driver/gpio.h>
+#include <sdkconfig.h>
 
 static const char *TAG = "usb";
 
 #define USB_EVENT_KEYPRESS	(1 << 0)
+#define USB_EVENT_RESTART   (1 << 1)
+#define USB_EVENT_SHUTDOWN  (1 << 2)
 static EventGroupHandle_t usb_event_group = NULL;
+
+// Forward declaration for the send_key function
+static void send_key(uint8_t keycode, uint8_t modifier, int hold_ms, int release_ms);
 
 #define TUSB_DESC_TOTAL_LEN      (TUD_CONFIG_DESC_LEN + CFG_TUD_HID * TUD_HID_DESC_LEN)
 
 const uint8_t hid_report_descriptor[] = {
-	TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(HID_ITF_PROTOCOL_KEYBOARD))
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(HID_ITF_PROTOCOL_KEYBOARD))
 };
 
 const char *hid_string_descriptor[5] = {
-	// Array of pointer to string descriptors
 	(char[]) {
  0x09, 0x04
 },  // 0: is supported language is English (0x0409)
@@ -37,15 +43,11 @@ static const uint8_t hid_configuration_descriptor[] = {
 };
 
 // Invoked when received GET HID REPORT DESCRIPTOR request
-// Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
-	// We use only one interface and one HID report descriptor, so we can ignore parameter 'instance'
 	return hid_report_descriptor;
 }
 
 // Invoked when received GET_REPORT control request
-// Application must fill buffer report's content and return its length.
-// Return zero will cause the stack to STALL request
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_t report_type, uint8_t *buffer, uint16_t reqlen) {
 	(void)instance;
 	(void)report_id;
@@ -68,11 +70,103 @@ void usb_request_keypress_send(bool from_isr) {
 		xEventGroupSetBits(usb_event_group, USB_EVENT_KEYPRESS);
 }
 
+void usb_request_restart_send(bool from_isr) {
+    if (from_isr)
+        xEventGroupSetBitsFromISR(usb_event_group, USB_EVENT_RESTART, NULL);
+    else
+        xEventGroupSetBits(usb_event_group, USB_EVENT_RESTART);
+}
+
+void usb_request_shutdown_send(bool from_isr) {
+    if (from_isr)
+        xEventGroupSetBitsFromISR(usb_event_group, USB_EVENT_SHUTDOWN, NULL);
+    else
+        xEventGroupSetBits(usb_event_group, USB_EVENT_SHUTDOWN);
+}
+
+// Restart Parsec application - kill and restart
+void usb_request_restart_app_parsec(bool from_isr) {
+    static const uint8_t keys[] = {
+        0x04, // 'a' key - Alt+F4 to close
+        0x00, // no key pressed - release
+        0x16, // 's' key - for search/start menu
+        0x00, // release
+        0x13, // 'p' key - for typing "parsec"
+        0x00,
+        0x04, // 'a' key
+        0x00,
+        0x15, // 'r' key
+        0x00,
+        0x16, // 's' key
+        0x00,
+        0x08, // 'e' key
+        0x00,
+        0x06, // 'c' key
+        0x00,
+        0x28, // Enter key
+        0x00
+    };
+
+    if (from_isr) {
+        // Handle ISR case if needed
+    } else {
+        for (size_t i = 0; i < sizeof(keys); i++) {
+            send_key(keys[i], 0, 100, 100);
+        }
+    }
+}
+
+// Restart Anydesk application - kill and restart
+void usb_request_restart_app_anydesk(bool from_isr) {
+    static const uint8_t keys[] = {
+        0x04, // 'a' key - Alt+F4 to close
+        0x00, // no key pressed - release
+        0x16, // 's' key - for search/start menu
+        0x00, // release
+        0x04, // 'a' key - for typing "anydesk"
+        0x00,
+        0x11, // 'n' key
+        0x00,
+        0x1C, // 'y' key
+        0x00,
+        0x07, // 'd' key
+        0x00,
+        0x08, // 'e' key
+        0x00,
+        0x16, // 's' key
+        0x00,
+        0x0B, // 'h' key
+        0x00,
+        0x28, // Enter key
+        0x00
+    };
+
+    if (from_isr) {
+        // Handle ISR case if needed
+    } else {
+        for (size_t i = 0; i < sizeof(keys); i++) {
+            send_key(keys[i], 0, 100, 100);
+        }
+    }
+}
+
+// Helper function to send a keyboard keypress and release with delay
+static void send_key(uint8_t keycode, uint8_t modifier, int hold_ms, int release_ms) {
+    uint8_t keys[6] = { keycode };
+    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, modifier, keys);
+    vTaskDelay(pdMS_TO_TICKS(hold_ms));
+    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL); // Release all keys
+    vTaskDelay(pdMS_TO_TICKS(release_ms));
+}
+
 static void usb_task(void *pvParameters) {
 	ESP_LOGI(TAG, "usb task started");
 
 	while (1) {
-		EventBits_t bits = xEventGroupWaitBits(usb_event_group, USB_EVENT_KEYPRESS, pdTRUE, pdFALSE, portMAX_DELAY);
+		EventBits_t bits = xEventGroupWaitBits(usb_event_group, 
+                                              USB_EVENT_KEYPRESS | USB_EVENT_RESTART | USB_EVENT_SHUTDOWN, 
+                                              pdTRUE, pdFALSE, portMAX_DELAY);
+        
 		if (bits & USB_EVENT_KEYPRESS) {
 			xEventGroupClearBits(usb_event_group, USB_EVENT_KEYPRESS);
 
@@ -82,15 +176,96 @@ static void usb_task(void *pvParameters) {
 
 				tud_remote_wakeup();
 
-				// uint8_t keycode[6] = { HID_KEY_A };
-				// tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, keycode);
 				vTaskDelay(pdMS_TO_TICKS(50));
-				// tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
 
 				led_handle_keypress_off();
-			} else
+			} else {
 				ESP_LOGI(TAG, "not mounted, not sending keypress");
+            }
 		}
+        
+        if (bits & USB_EVENT_RESTART) {
+            xEventGroupClearBits(usb_event_group, USB_EVENT_RESTART);
+            
+            if (tud_mounted()) {
+                ESP_LOGI(TAG, "sending PC restart signal");
+                led_handle_keypress_on();
+                
+                #if CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_ENABLED
+                    ESP_LOGI(TAG, "Using hardware reset pin");
+                    gpio_config_t io_conf = {};
+                    io_conf.intr_type = GPIO_INTR_DISABLE;
+                    io_conf.mode = GPIO_MODE_OUTPUT;
+                    io_conf.pin_bit_mask = (1ULL << CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM);
+                    io_conf.pull_down_en = 0;
+                    io_conf.pull_up_en = 0;
+                    gpio_config(&io_conf);
+                    
+                    gpio_set_level(CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM, 0);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                    gpio_set_level(CONFIG_ESP_WAKEUP_KEYPRESS_RESET_GPIO_NUM, 1);
+                #else
+                    ESP_LOGI(TAG, "Using keyboard sequence for restart");
+                    
+                    tud_remote_wakeup();
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    
+                    uint8_t keycode[6] = { HID_KEY_DELETE };
+                    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 
+                                           KEYBOARD_MODIFIER_LEFTCTRL | KEYBOARD_MODIFIER_LEFTALT, 
+                                           keycode);
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    tud_hid_keyboard_report(HID_ITF_PROTOCOL_KEYBOARD, 0, NULL);
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    
+                    send_key(HID_KEY_ARROW_UP, 0, 100, 300);
+                    send_key(HID_KEY_ENTER, 0, 100, 300);
+                    send_key(HID_KEY_ARROW_UP, 0, 100, 300);
+                    send_key(HID_KEY_ENTER, 0, 100, 300);
+                #endif
+                
+                led_handle_keypress_off();
+            } else {
+                ESP_LOGI(TAG, "not mounted, not sending restart signal");
+            }
+        }
+
+        if (bits & USB_EVENT_SHUTDOWN) {
+            xEventGroupClearBits(usb_event_group, USB_EVENT_SHUTDOWN);
+            
+            if (tud_mounted()) {
+                ESP_LOGI(TAG, "sending PC shutdown signal");
+                led_handle_keypress_on();
+                
+                tud_remote_wakeup();
+                vTaskDelay(pdMS_TO_TICKS(500));
+                
+                send_key(HID_KEY_R, KEYBOARD_MODIFIER_LEFTGUI, 100, 300);
+                
+                send_key(HID_KEY_S, 0, 100, 50);
+                send_key(HID_KEY_H, 0, 100, 50);
+                send_key(HID_KEY_U, 0, 100, 50);
+                send_key(HID_KEY_T, 0, 100, 50);
+                send_key(HID_KEY_D, 0, 100, 50);
+                send_key(HID_KEY_O, 0, 100, 50);
+                send_key(HID_KEY_W, 0, 100, 50);
+                send_key(HID_KEY_N, 0, 100, 50);
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_SLASH, 0, 100, 50);
+                send_key(HID_KEY_S, 0, 100, 50);
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_SLASH, 0, 100, 50);
+                send_key(HID_KEY_T, 0, 100, 50);
+                send_key(HID_KEY_SPACE, 0, 100, 50);
+                send_key(HID_KEY_0, 0, 100, 50);
+                
+                send_key(HID_KEY_ENTER, 0, 100, 50);
+                
+                led_handle_keypress_off();
+            } else {
+                ESP_LOGI(TAG, "not mounted, not sending shutdown signal");
+            }
+        }
 	}
 }
 

@@ -9,37 +9,50 @@ the network adapter, it's not a configuration issue). ESP Wakeup Keypress is
 the solution I came up with - I can make a GET request to the ESP device and
 it wakes up the computer for me.
 
+## Features
+
+- Modern, responsive web UI with dark mode support
+- USB keyboard wake-up functionality
+- Wake-on-LAN (WoL) functionality as a fallback option
+- Visual status indicators for connection state
+- Animated background with subtle gradients
+- Dark mode toggle
+
 ## Usage
 
-- Run `00-init.sh`, this will download and install ESP-IDF and all its
+- Run `./00-init.sh`, this will download and install ESP-IDF and all its
   dependencies
-- Run `00-set-target.sh esp32s3` (replace `esp32s3` with your target)
+- Run `./00-set-target.sh esp32s3` (replace `esp32s3` with your target)
 - Edit the following settings in `sdkconfig`:
 
   - CONFIG_ESP_WAKEUP_KEYPRESS_WIFI_SSID
   - CONFIG_ESP_WAKEUP_KEYPRESS_WIFI_PASSWORD
-  - CONFIG_ESP_WAKEUP_KEYPRESS_HTTPD_PASSWORD
   - CONFIG_ESP_WAKEUP_KEYPRESS_LED_STRIP_GPIO_NUM
 
 I'm using a ESP32-S3-DevKitC which has the LED strip at GPIO48, but the latest
 release of the devkit (ESP32-S3-DevKitC-1) has it on GPIO38.
 
-- Run `01-build.sh`
+- Run `./01-build.sh`
 - Create the file `defport-flash` and put `/dev/ttyACM0` into it (or the port
   where your ESP can be programmed)
 - Put your ESP into bootloader mode by pressing and holding the GPIO0 button
   while pressing the reset button
-- Run `02-flash.sh`
+- Run `./02-flash.sh`
 - Create the file `defport-monitor` and put `/dev/ttyUSB0` into it (or the port
   where your ESP serial console is)
-- Run `03-monitor.sh`
+- Run `./03-monitor.sh`
 - Press the reset button on your board to exit bootloader mode
 
-Now if you press the button on your board, or open the URL
-`http://esp-wakeup-keypress.localdomain/wakeup?pass=wakeup` an wakeup signal is
-sent to your computer. You may need to change the `pass=wakeup` in the URL
-if you've modified CONFIG_ESP_WAKEUP_KEYPRESS_HTTPD_PASSWORD in the
-`sdkconfig` file.
+Once your device is running, simply navigate to its IP address in a web browser to access 
+the modern web UI. From there you can:
+
+- Use the "Wake Computer (USB)" button to send a keypress wake signal
+- Use the "Wake Computer (WoL)" button to send a Wake-on-LAN magic packet
+- Toggle between light and dark mode using the moon/sun icon
+
+For command-line usage, you can also directly access the endpoints:
+- `http://esp-wakeup-keypress.localdomain/wakeup` - USB wake-up
+- `http://esp-wakeup-keypress.localdomain/wol?mac=70-85-C2-FA-D0-27` - WoL wake-up
 
 ## Troubleshooting
 
