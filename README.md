@@ -1,14 +1,3 @@
-# ESP Wakeup Keypress
-
-A firmware for ESP32 devices to act as a USB keyboard and wake up the computer
-when a HTTP request is received.
-
-The story behind this is that my computer won't power on for Wake on LAN magic
-packets for some unkown Linux/UEFI reason (all needed settings are enabled for
-the network adapter, it's not a configuration issue). ESP Wakeup Keypress is
-the solution I came up with - I can make a GET request to the ESP device and
-it wakes up the computer for me.
-
 ## Features
 
 - Modern, responsive web UI with dark mode support
